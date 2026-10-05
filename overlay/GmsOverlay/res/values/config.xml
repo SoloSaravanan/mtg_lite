@@ -10,18 +10,6 @@
         <item>com.google.android.gms</item>
     </string-array>
 
-    <!-- The name of the package that will hold the assistant role by default. -->
-    <string name="config_defaultAssistant" translatable="false">com.google.android.googlequicksearchbox</string>
-
-    <!-- The names of the packages that will hold the automotive projection role. -->
-    <string name="config_systemAutomotiveProjection" translatable="false">com.google.android.projection.gearhead</string>
-
-    <!-- The name of the package that will hold the speech recognizer role by default. -->
-    <string name="config_systemSpeechRecognizer" translatable="false">com.google.android.tts</string>
-
-    <!-- The name of the package that will hold the wellbeing role. -->
-    <string name="config_systemWellbeing" translatable="false">com.google.android.apps.wellbeing</string>
-
     <!-- The name of the package that will hold the game service role. -->
     <string name="config_systemGameService" translatable="false">com.google.android.gms</string>
 
@@ -37,9 +25,6 @@
     <!-- Flag indicating which package name can access the persistent data partition -->
     <string name="config_persistentDataPackageName" translatable="false">com.google.android.gms</string>
 
-    <!-- Colon separated list of package names that should be granted DND access -->
-    <string name="config_defaultDndAccessPackages" translatable="false">com.google.android.gms:com.google.android.apps.wellbeing</string>
-
     <!-- An array of packages that can make sound on the ringer stream in priority-only DND
      mode -->
     <string-array name="config_priorityOnlyDndExemptPackages" translatable="false">
@@ -49,21 +34,6 @@
         <item>android</item>
         <item>com.android.systemui</item>
     </string-array>
-
-    <!-- The component name, flattened to a string, for the default accessibility service to be
-         enabled by the accessibility shortcut. This service must be trusted, as it can be activated
-         without explicit consent of the user. If no accessibility service with the specified name
-         exists on the device, the accessibility shortcut will be disabled by default. -->
-    <string name="config_defaultAccessibilityService" translatable="false">com.google.android.marvin.talkback/.TalkBackService</string>
-
-    <!-- The package name for the default wellbeing app.
-         This package must be trusted, as it has the permissions to control other applications
-         on the device.
-         Example: "com.android.wellbeing"
-
-         Note: This config is deprecated, please use config_systemWellbeing instead.
-     -->
-    <string name="config_defaultWellbeingPackage" translatable="false">com.google.android.apps.wellbeing</string>
 
     <!-- The component name, flattened to a string, for the system's credential manager
       hybrid service. This service allows credential retrieval and storage from, and to
@@ -117,11 +87,6 @@
         <item>com.google</item>
     </string-array>
 
-    <!-- Names of packages that should not be suspended when personal use is blocked by policy. -->
-    <string-array name="config_packagesExemptFromSuspension" translatable="false">
-        <item>com.google.android.apps.wellbeing</item>
-    </string-array>
-
     <!-- Certificate digests for trusted apps that will be allowed to obtain the knownSigner
          SET_DEFAULT_ACCOUNT_FOR_CONTACTS permissions. The digest should be computed over the DER
          encoding of the trusted certificate using the SHA-256 digest algorithm. -->
@@ -134,9 +99,6 @@
     <!-- Component name that accepts settings intents for saved devices.
              Used by FastPairSettingsFragment. -->
     <string name="config_defaultNearbyFastPairSettingsDevicesComponent" translatable="false">com.google.android.gms/com.google.android.gms.nearby.discovery.devices.SavedDevicesSettingsActivity</string>
-
-    <!-- Name of the package responsible to handle Contextual Search. -->
-    <string name="config_defaultContextualSearchPackageName" translatable="false">com.google.android.googlequicksearchbox</string>
 
     <!-- The key containing the entrypoint for Contextual Search. -->
     <string name="config_defaultContextualSearchKey" translatable="false">omni.entry_point</string>

@@ -41,7 +41,6 @@
     <app-link package="com.google.android.apps.docs" />
     <app-link package="com.google.android.apps.photos" />
     <app-link package="com.google.android.apps.youtube.music" />
-    <app-link package="com.google.android.googlequicksearchbox" />
 
     <!-- Apps below are optional on GMS devices -->
     <app-link package="com.google.android.apps.docs.editors.sheets" />

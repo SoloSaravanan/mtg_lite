@@ -328,25 +328,7 @@ if __name__ == "__main__":
                 additional_makefiles_to_inherit=[],
             ),
             GappsTarget(
-                name="arm",
-                soong_imports=["vendor/gapps/common"],
-                additional_namespaces=[],
-                additional_packages=[],
-                additional_makefiles_to_inherit=[
-                    "vendor/gapps/common/common-vendor.mk",
-                ],
-            ),
-            GappsTarget(
                 name="arm64",
-                soong_imports=["vendor/gapps/common"],
-                additional_namespaces=[],
-                additional_packages=[],
-                additional_makefiles_to_inherit=[
-                    "vendor/gapps/common/common-vendor.mk",
-                ],
-            ),
-            GappsTarget(
-                name="x86_64",
                 soong_imports=["vendor/gapps/common"],
                 additional_namespaces=[],
                 additional_packages=[],

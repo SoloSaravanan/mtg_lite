@@ -4,13 +4,11 @@ product/app/GoogleContactsSyncAdapter/GoogleContactsSyncAdapter.apk;PRESIGNED|ec
 product/framework/com.google.android.dialer.support.jar;PRESIGNED
 
 product/etc/default-permissions/default-permissions-google.xml
-product/etc/default-permissions/default-permissions-mtg.xml|afed7779481b014731f3af28b780f1dc4e8f56c9
 
 product/etc/init/gapps.rc|cdd8ccd80a06f27b880c788de4200992f2ad004c
 
 product/etc/permissions/com.google.android.dialer.support.xml
 product/etc/permissions/privapp-permissions-google-product.xml
-product/etc/permissions/privapp-permissions-mtg.xml|b8bcdbc95f03e6c3e50a015c092d5a4b3fc878d7
 
 product/etc/security/fsverity/gms_fsverity_cert.der
 

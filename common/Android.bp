@@ -80,14 +80,6 @@ prebuilt_etc {
 }
 
 prebuilt_etc {
-    name: "default-permissions-mtg.xml",
-    src: "proprietary/product/etc/default-permissions/default-permissions-mtg.xml",
-    relative_install_path: "default-permissions",
-    filename_from_src: true,
-    product_specific: true,
-}
-
-prebuilt_etc {
     name: "gapps.rc",
     src: "proprietary/product/etc/init/gapps.rc",
     relative_install_path: "init",
@@ -133,14 +125,6 @@ prebuilt_etc {
     relative_install_path: "permissions",
     filename_from_src: true,
     system_ext_specific: true,
-}
-
-prebuilt_etc {
-    name: "privapp-permissions-mtg.xml",
-    src: "proprietary/product/etc/permissions/privapp-permissions-mtg.xml",
-    relative_install_path: "permissions",
-    filename_from_src: true,
-    product_specific: true,
 }
 
 prebuilt_etc {

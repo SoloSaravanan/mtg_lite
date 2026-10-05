@@ -1,53 +1,27 @@
-# vendor_gapps
+# MindTheGapps Lite
 
-**GApps for android devices**
+**A lightweight Google Apps package for Android devices.**
 
-Build standalone zips
--------------------
+This checkout currently provides arm64 builds.
 
-You can compile your GApps package with GNU make
+## Build a standalone ZIP
 
-_make distclean_
-- Remove output directory
+From the repository root, run make distclean and make gapps_arm64.
 
-_make gapps_arm_
-- compile signed flashable GApps for arm
+The signed package is written under out/.
 
-_make gapps_arm64_
-- compile signed flashable GApps for arm64
+## Build inline with Android
 
-_make gapps_x86_64_
-- compile signed flashable GApps for x86_64
+1. Sync this repository to the path stored in $GAPPS_PATH.
+2. Include $GAPPS_PATH/arm64/arm64-vendor.mk from the product makefile.
 
-Build inline with Android
--------------------
-1. Sync this repo to `$GAPPS_PATH` where `$GAPPS_PATH` is the path to this repo
-2. Include `$GAPPS_PATH/$ARCH/$ARCH-vendor.mk` where `$ARCH` is arm, arm64, or x86_64 depending on the device's architecture
+## Included components
 
-Explanation of pinned blobs
--------------------
-NOTE: All arch specific blobs not specifically explained here are pinned for the sake of being able to extract independently of the architecture of the source device.
-
-AndroidMigratePrebuilt.apk
-- This is from a marlin factory image to avoid crashes with the one found in the walleye factory images.
-
-GoogleCalendarSyncAdapter.apk
-- This is no longer included in Google system images and is required for syncing Google Calendar accounts with AOSP Calendar.
-
-PrebuiltExchange3Google.apk
-- This is no longer included in Google system images and is required for using Exchange accounts in the Gmail app.
-
-PrebuiltGmsCore.apk
-- This is a nodpi apk so that it works properly on all devices and updates to the appropriate one. This is generally from APKMirror and is not usually updated between major version updates.
-
-SetupWizard.apk
-- This is a non-pixel SetupWizard for better UX and less pixel-specific references.
-
-default-permissions.xml and privapp-permissions-google.xml
-- These do not always contain all the necessary permissions for apks which are not from the corresponding factory image, so they must be modified to avoid permission related crashes.
-
-libjni_latinimegoogle.so
-- This lib is no longer included in Google system images and is required for swype typing with AOSP LatinIME.
+- Google Play Store (Phonesky)
+- Google Play services system APEX
+- Google Services Framework
+- Google Calendar and Contacts sync adapters
+- Google LatinIME support library
 
 Thanks and Credits
 -------------------
