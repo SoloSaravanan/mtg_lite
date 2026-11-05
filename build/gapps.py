@@ -13,6 +13,9 @@ ANDROIDV, SDKV = ("17.0.0", 37)
 GARCH = sys.argv[1]
 CPUARCH = sys.argv[2] if len(sys.argv) > 2 else GARCH
 
+if GARCH != "arm64" or CPUARCH != "arm64":
+    raise SystemExit("This branch supports arm64 builds only")
+
 GAPPS_TOP = Path(__file__).resolve().parents[1]
 
 GAPPS_BUILD = GAPPS_TOP / "build"
@@ -27,7 +30,6 @@ GAPPS_OUT = GAPPS_TOP / "out"
 GAPPS_OUT_GARCH = GAPPS_OUT / GARCH
 GAPPS_OUT_GARCH_METAINF = GAPPS_OUT_GARCH / "META-INF"
 GAPPS_OUT_GARCH_SYSTEM = GAPPS_OUT_GARCH / "system"
-GAPPS_OUT_GARCH_SYSTEM_ADDOND = GAPPS_OUT_GARCH_SYSTEM / "addon.d"
 GAPPS_OUT_ZIP_BASENAME = (
     GAPPS_OUT
     / f"MindTheGapps-{ANDROIDV}-{GARCH}-{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}"
@@ -58,6 +60,8 @@ def run_command(*args, **kwargs) -> subprocess.CompletedProcess:
 def build() -> None:
     # Build overlays
     for overlay in GAPPS_OVERLAY.iterdir():
+        if overlay.name == "GmsSetupWizardOverlay":
+            continue
         if not overlay.is_dir():
             continue
 
@@ -125,11 +129,6 @@ def build() -> None:
             text=True,
         )
         os.remove(f"{overlay_target}.idsig")
-
-    # Copy addon.d scripts
-    GAPPS_OUT_GARCH_SYSTEM_ADDOND.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(GAPPS_TOP / "addond_head", GAPPS_OUT_GARCH_SYSTEM_ADDOND)
-    shutil.copy2(GAPPS_TOP / "addond_tail", GAPPS_OUT_GARCH_SYSTEM_ADDOND)
 
     # Copy META-INF
     shutil.copytree(GAPPS_BUILD_META, GAPPS_OUT_GARCH_METAINF, dirs_exist_ok=True)

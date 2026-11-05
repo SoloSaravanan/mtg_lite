@@ -5,7 +5,6 @@
          access while in power save mode, even if they aren't in the foreground. -->
 
     <!-- GmsCore must always have network access for GCM and other things. -->
-    <allow-in-power-save package="com.google.android.gms" />
     <allow-in-data-usage-save package="com.google.android.gms" />
     <allow-unthrottled-location package="com.google.android.gms" />
     <allow-ignore-location-settings package="com.google.android.gms" attributionTag="com.google.android.gms.thunderbird" />
@@ -26,10 +25,6 @@
 
     <!-- Play Store likewise must have network access to support other applications. -->
     <allow-in-power-save-except-idle package="com.android.vending" />
-
-    <!-- Allow SetupWizard keeping at unrestricted mode of Battery usage. -->
-    <bg-restriction-exemption package="com.google.android.setupwizard"/>
-    <bg-restriction-exemption package="com.google.android.apps.setupwizard.searchselector"/>
 
     <!-- These Google applications all handle URLs to their websites by default -->
 
@@ -58,10 +53,6 @@
         service="com.google.android.gms/.backup.BackupTransportService" />
     <backup-transport-whitelisted-service
         service="com.google.android.gms/.backup.component.D2dTransportService" />
-    <backup-transport-whitelisted-service
-        service="com.google.android.apps.restore/.transport.BackupTransportService" />
-    <backup-transport-whitelisted-service
-        service="com.google.android.apps.restore/.transport.D2dTransportService" />
 
     <!-- Specify the explicit set of other applications that AI services are allowed to
          interact with, including the providers that back the implementation of the APIs

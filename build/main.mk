@@ -9,10 +9,6 @@ distclean:
 	@rm -fr $(OUTDIR)
 	@echo "Output removed! Ready for a clean build"
 
-gapps_arm:
-	@echo "Compiling GApps for arm..."
-	@$(BUILD_GAPPS) arm 2>&1
-
 gapps_arm64:
 	@echo "Compiling GApps for arm64..."
 	@$(BUILD_GAPPS) arm64 2>&1

@@ -363,18 +363,13 @@ if __name__ == "__main__":
                 soong_imports=[],
                 additional_namespaces=["vendor/gapps/overlay"],
                 additional_packages=sorted(
-                    [x.name for x in Path("overlay").glob("*Overlay")]
+                    [
+                        x.name
+                        for x in Path("overlay").glob("*Overlay")
+                        if x.name != "GmsSetupWizardOverlay"
+                    ]
                 ),
                 additional_makefiles_to_inherit=[],
-            ),
-            GappsTarget(
-                name="arm",
-                soong_imports=["vendor/gapps/common"],
-                additional_namespaces=[],
-                additional_packages=[],
-                additional_makefiles_to_inherit=[
-                    "vendor/gapps/common/common-vendor.mk",
-                ],
             ),
             GappsTarget(
                 name="arm64",

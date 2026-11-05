@@ -277,15 +277,6 @@ if [ -n "$SYSTEM_EXT_BLOCK" ] && [ "$SYSTEM_EXT_STORAGE" -lt "$NEEDED_STORAGE_SY
   fi
 fi
 
-ui_print "Generating addon.d file"
-cat addon.d/addond_head > addon.d/30-gapps.sh
-for f in `find . ! -path "./addon.d/*" -type f`; do
-  line=$(echo "$f" | sed 's/\.\///')
-  echo "$line" >> addon.d/30-gapps.sh
-done
-cat addon.d/addond_tail >> addon.d/30-gapps.sh
-rm addon.d/addond_head addon.d/addond_tail
-
 ui_print "Preparing files for copying"
 for d in `find . -mindepth 1 -type d -type d`; do
   set_perm 0755 $d
