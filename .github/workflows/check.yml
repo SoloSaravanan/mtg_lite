@@ -55,6 +55,7 @@ jobs:
           pattern: MindTheGapps-Lite-*-arm64-*
           path: release-assets
           merge-multiple: true
+          skip-decompress: true
 
       - name: Create GitHub prerelease
         env:
@@ -66,7 +67,6 @@ jobs:
 
           mapfile -d '' packages < <(find release-assets -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print0)
           mapfile -d '' checksums < <(find release-assets -type f -name 'MindTheGapps-Lite-*-arm64-*.zip.sha256sum' -print0)
-          echo "::notice title=Release diagnostic::Found ${#packages[@]} ZIP file(s) and ${#checksums[@]} checksum file(s)"
           if (( ${#packages[@]} != 1 || ${#checksums[@]} != 1 )); then
             available_files="$(find release-assets -type f -printf '%P, ' 2>/dev/null || true)"
             printf '::error title=Release artifact discovery failed::Found %d ZIP file(s) and %d checksum file(s). Downloaded files: %s\n' "${#packages[@]}" "${#checksums[@]}" "$available_files"
@@ -87,11 +87,9 @@ jobs:
             cd "$(dirname "$package")"
             sha256sum -c "$(basename "$checksum")"
           )
-          echo "::notice title=Release diagnostic::ZIP checksum verified"
 
           version="$(basename "$package" | cut -d- -f3)"
           tag="mindthegapps-lite-arm64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          echo "::notice title=Release diagnostic::Creating prerelease for $(basename "$package")"
           if release_output="$(gh release create "$tag" "$package" "$checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
