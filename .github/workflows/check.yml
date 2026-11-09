@@ -62,36 +62,36 @@ jobs:
         run: |
           set -euo pipefail
           gh --version
-          echo "::notice title=Release diagnostic::GitHub CLI is available"
           test -n "$GH_TOKEN"
-          echo "::notice title=Release diagnostic::GitHub token is present"
 
-          mapfile -d '' packages < <(find release-assets -maxdepth 1 -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print0)
-          if (( ${#packages[@]} != 1 )); then
-            echo "Expected exactly one MindTheGapps-Lite arm64 ZIP; found ${#packages[@]}" >&2
-            find release-assets -maxdepth 1 -type f -printf '%f\n' >&2
+          mapfile -d '' packages < <(find release-assets -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print0)
+          mapfile -d '' checksums < <(find release-assets -type f -name 'MindTheGapps-Lite-*-arm64-*.zip.sha256sum' -print0)
+          echo "::notice title=Release diagnostic::Found ${#packages[@]} ZIP file(s) and ${#checksums[@]} checksum file(s)"
+          if (( ${#packages[@]} != 1 || ${#checksums[@]} != 1 )); then
+            available_files="$(find release-assets -type f -printf '%P, ' 2>/dev/null || true)"
+            printf '::error title=Release artifact discovery failed::Found %d ZIP file(s) and %d checksum file(s). Downloaded files: %s\n' "${#packages[@]}" "${#checksums[@]}" "$available_files"
+            echo "Expected exactly one arm64 ZIP and checksum" >&2
+            find release-assets -type f -printf '%P\n' >&2
             exit 1
           fi
+
           package="${packages[0]}"
-          echo "::notice title=Release diagnostic::Found ZIP $(basename "$package")"
+          checksum_source="${checksums[0]}"
           checksum="$package.sha256sum"
-          if [ ! -f "$checksum" ]; then
-            echo "Checksum file is missing: $checksum" >&2
-            find release-assets -maxdepth 1 -type f -printf '%f\n' >&2
-            exit 1
+          if [ "$checksum_source" != "$checksum" ]; then
+            cp -- "$checksum_source" "$checksum"
           fi
 
-          echo "::notice title=Release diagnostic::Found matching checksum file"
           printf 'Release package: %s\nChecksum: %s\n' "$package" "$checksum"
           (
-            cd release-assets
+            cd "$(dirname "$package")"
             sha256sum -c "$(basename "$checksum")"
           )
           echo "::notice title=Release diagnostic::ZIP checksum verified"
 
           version="$(basename "$package" | cut -d- -f3)"
           tag="mindthegapps-lite-arm64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          echo "::notice title=Release diagnostic::Starting GitHub release creation"
+          echo "::notice title=Release diagnostic::Creating prerelease for $(basename "$package")"
           if release_output="$(gh release create "$tag" "$package" "$checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
