@@ -62,7 +62,9 @@ jobs:
         run: |
           set -euo pipefail
           gh --version
+          echo "::notice title=Release diagnostic::GitHub CLI is available"
           test -n "$GH_TOKEN"
+          echo "::notice title=Release diagnostic::GitHub token is present"
 
           mapfile -d '' packages < <(find release-assets -maxdepth 1 -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print0)
           if (( ${#packages[@]} != 1 )); then
@@ -71,6 +73,7 @@ jobs:
             exit 1
           fi
           package="${packages[0]}"
+          echo "::notice title=Release diagnostic::Found ZIP $(basename "$package")"
           checksum="$package.sha256sum"
           if [ ! -f "$checksum" ]; then
             echo "Checksum file is missing: $checksum" >&2
@@ -78,14 +81,17 @@ jobs:
             exit 1
           fi
 
+          echo "::notice title=Release diagnostic::Found matching checksum file"
           printf 'Release package: %s\nChecksum: %s\n' "$package" "$checksum"
           (
             cd release-assets
             sha256sum -c "$(basename "$checksum")"
           )
+          echo "::notice title=Release diagnostic::ZIP checksum verified"
 
           version="$(basename "$package" | cut -d- -f3)"
           tag="mindthegapps-lite-arm64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "::notice title=Release diagnostic::Starting GitHub release creation"
           if release_output="$(gh release create "$tag" "$package" "$checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
