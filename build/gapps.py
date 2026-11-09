@@ -30,6 +30,7 @@ GAPPS_OUT = GAPPS_TOP / "out"
 GAPPS_OUT_GARCH = GAPPS_OUT / GARCH
 GAPPS_OUT_GARCH_METAINF = GAPPS_OUT_GARCH / "META-INF"
 GAPPS_OUT_GARCH_SYSTEM = GAPPS_OUT_GARCH / "system"
+GAPPS_OUT_GARCH_SYSTEM_ADDOND = GAPPS_OUT_GARCH_SYSTEM / "addon.d"
 GAPPS_OUT_ZIP_BASENAME = (
     GAPPS_OUT
     / f"MindTheGapps-{ANDROIDV}-{GARCH}-{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}"
@@ -58,6 +59,13 @@ def run_command(*args, **kwargs) -> subprocess.CompletedProcess:
 
 
 def build() -> None:
+    # Avoid stale files from an interrupted or previous build.
+    if GAPPS_OUT_GARCH.is_symlink() or GAPPS_OUT_GARCH.is_file():
+        GAPPS_OUT_GARCH.unlink()
+    elif GAPPS_OUT_GARCH.exists():
+        shutil.rmtree(GAPPS_OUT_GARCH)
+    GAPPS_OUT.mkdir(parents=True, exist_ok=True)
+
     # Build overlays
     for overlay in GAPPS_OVERLAY.iterdir():
         if overlay.name == "GmsSetupWizardOverlay":
@@ -128,7 +136,7 @@ def build() -> None:
             stderr=subprocess.PIPE,
             text=True,
         )
-        os.remove(f"{overlay_target}.idsig")
+        Path(f"{overlay_target}.idsig").unlink(missing_ok=True)
 
     # Copy META-INF
     shutil.copytree(GAPPS_BUILD_META, GAPPS_OUT_GARCH_METAINF, dirs_exist_ok=True)
@@ -150,6 +158,12 @@ def build() -> None:
 
                 os.remove(chunk)
 
+    # Restore templates are consumed by the recovery installer to generate
+    # addon.d/30-gapps.sh from the final payload after device-specific pruning.
+    GAPPS_OUT_GARCH_SYSTEM_ADDOND.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(GAPPS_TOP / "addond_head", GAPPS_OUT_GARCH_SYSTEM_ADDOND)
+    shutil.copy2(GAPPS_TOP / "addond_tail", GAPPS_OUT_GARCH_SYSTEM_ADDOND)
+
     # Copy toybox
     shutil.copy2(GAPPS_TOP / f"toybox-{GARCH}", GAPPS_OUT_GARCH / "toybox")
 
@@ -163,6 +177,13 @@ def build() -> None:
     shutil.make_archive(GAPPS_OUT_ZIP_BASENAME_UNSIGNED, "zip", GAPPS_OUT_GARCH)
 
     # Sign
+    sign_env = os.environ.copy()
+    existing_library_path = sign_env.get("LD_LIBRARY_PATH")
+    sign_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        value
+        for value in (str(GAPPS_BUILD_SIGN), existing_library_path)
+        if value
+    )
     run_command(
         [
             "java",
@@ -177,19 +198,16 @@ def build() -> None:
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={"LD_LIBRARY_PATH": GAPPS_BUILD_SIGN},
+        env=sign_env,
         text=True,
     )
     os.remove(GAPPS_OUT_ZIP_FILENAME_UNSIGNED)
 
     # Generate sha256 file
+    with open(GAPPS_OUT_ZIP_FILENAME, "rb") as zip_file:
+        digest = hashlib.file_digest(zip_file, "sha256").hexdigest()
     with open(GAPPS_OUT / f"{GAPPS_OUT_ZIP_FILENAME}.sha256sum", "wt+") as f:
-        f.write(
-            hashlib.file_digest(
-                open(GAPPS_OUT_ZIP_FILENAME, "rb"), "sha256"
-            ).hexdigest()
-        )
-        f.write(f"  {GAPPS_OUT_ZIP_FILENAME.name}\n")
+        f.write(f"{digest}  {GAPPS_OUT_ZIP_FILENAME.name}\n")
 
     # Clean up
     shutil.rmtree(GAPPS_OUT_GARCH)

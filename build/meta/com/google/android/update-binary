@@ -1,7 +1,16 @@
 #!/sbin/sh
 
 OUTFD="/proc/self/fd/$2"
-ZIP=$3
+ZIP="$3"
+TMP=/tmp
+WORKDIR="$TMP/mtg-lite-installer"
+SYSTEM_MNT=/mnt/system
+PRODUCT_MNT=/product
+SYSTEM_EXT_MNT=/system_ext
+RECOVERY_FSTAB=/etc/recovery.fstab
+TOYBOX="$WORKDIR/toybox"
+TOYS_PATH="$WORKDIR/bin"
+PARTITIONS_TOUCHED=false
 
 set_con() {
   chcon -h u:object_r:"$1":s0 $2
@@ -27,14 +36,18 @@ getprop2() {
 
 cleanup() {
   ui_print "Cleaning up files"
-  rm -rf $TMP/system
-  rm -rf $TMP/bin
-  rm $TMP/toybox
+  cd / 2>/dev/null || true
+  rm -rf "$WORKDIR"
 
-  ui_print "Unmounting partitions"
-  umount -l "$SYSTEM_MNT"
-  umount -l /product || true
-  umount -l /system_ext || true
+  sync
+  if [ "$PARTITIONS_TOUCHED" = true ]; then
+    ui_print "Unmounting partitions"
+    umount "$SYSTEM_EXT_MNT" >/dev/null 2>&1 || umount -l "$SYSTEM_EXT_MNT" >/dev/null 2>&1 || true
+    umount "$PRODUCT_MNT" >/dev/null 2>&1 || umount -l "$PRODUCT_MNT" >/dev/null 2>&1 || true
+    umount "$SYSTEM_MNT" >/dev/null 2>&1 || umount -l "$SYSTEM_MNT" >/dev/null 2>&1 || true
+    umount /system_root >/dev/null 2>&1 || true
+    umount /system >/dev/null 2>&1 || true
+  fi
 }
 
 error() {
@@ -44,76 +57,250 @@ error() {
 }
 
 error_no_space() {
-  error "Not enough space for GApps! Aborting"
+  error "Not enough space on the $1 partition: need $2 KB, available $3 KB"
 }
 
 error_mounting() {
-  error "Could not mount $1! Aborting"
+  error "Could not mount $1 partition ($2) at $3. Check the recovery fstab and active slot."
 }
 
 get_block_for_mount_point() {
-  grep -v "^#" /etc/recovery.fstab | grep "[[:blank:]]$1[[:blank:]]" | tail -n1 | tr -s [:blank:] ' ' | cut -d' ' -f1
+  local mount_point="$1"
+  local fstab="$RECOVERY_FSTAB"
+  [ -r "$fstab" ] || fstab=/etc/fstab
+  [ -r "$fstab" ] || return 0
+
+  awk -v mount_point="$mount_point" '
+    /^[[:space:]]*#/ { next }
+    NF >= 2 && $2 == mount_point { source = $1 }
+    NF >= 3 && $1 == mount_point { source = $3 }
+    END { if (source != "") print source }
+  ' "$fstab"
+}
+
+find_existing_block() {
+  local candidate
+  for candidate in "$@"; do
+    if [ -n "$candidate" ] && [ -b "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
 }
 
 find_block() {
   local name="$1"
-  local fstab_entry=$(get_block_for_mount_point "/$name")
-  # P-SAR hacks
-  [ -z "$fstab_entry" ] && [ "$name" = "system" ] && fstab_entry=$(get_block_for_mount_point "/")
-  [ -z "$fstab_entry" ] && [ "$name" = "system" ] && fstab_entry=$(get_block_for_mount_point "/system_root")
+  local entry=""
+  local entry_name=""
+  local result=""
+  local by_name=""
 
-  local dev
+  entry=$(get_block_for_mount_point "/$name")
+  if [ "$name" = "system" ] && [ -z "$entry" ]; then
+    entry=$(get_block_for_mount_point "/")
+  fi
+  if [ "$name" = "system" ] && [ -z "$entry" ]; then
+    entry=$(get_block_for_mount_point "/system_root")
+  fi
+
+  if [ -n "$entry" ]; then
+    result=$(find_existing_block "$entry")
+    if [ -n "$result" ]; then
+      printf '%s\n' "$result"
+      return 0
+    fi
+
+    entry_name=$(basename "$entry")
+    case "$entry_name" in
+      *_a|*_b)
+        result=$(find_existing_block "$BLK_PATH/$entry_name")
+        ;;
+      *)
+        if [ -n "$SLOT_SUFFIX" ]; then
+          result=$(find_existing_block "$entry$SLOT_SUFFIX" "$BLK_PATH/$entry_name$SLOT_SUFFIX")
+        fi
+        if [ -z "$result" ]; then
+          result=$(find_existing_block "$BLK_PATH/$entry_name")
+        fi
+        ;;
+    esac
+    if [ -n "$result" ]; then
+      printf '%s\n' "$result"
+      return 0
+    fi
+  fi
+
   if [ "$DYNAMIC_PARTITIONS" = "true" ]; then
-    if [ -n "$fstab_entry" ]; then
-      dev="${BLK_PATH}/${fstab_entry}${SLOT_SUFFIX}"
-    else
-      dev="${BLK_PATH}/${name}${SLOT_SUFFIX}"
+    if [ -n "$SLOT_SUFFIX" ]; then
+      result=$(find_existing_block "$BLK_PATH/$name$SLOT_SUFFIX")
+    fi
+    if [ -z "$result" ]; then
+      result=$(find_existing_block "$BLK_PATH/$name")
     fi
   else
-    if [ -n "$fstab_entry" ]; then
-      dev="${fstab_entry}${SLOT_SUFFIX}"
-    else
-      dev="${BLK_PATH}/${name}${SLOT_SUFFIX}"
-    fi
+    for by_name in "$BLK_PATH" /dev/block/by-name /dev/block/platform/*/by-name; do
+      [ -d "$by_name" ] || continue
+      if [ -n "$SLOT_SUFFIX" ]; then
+        result=$(find_existing_block "$by_name/$name$SLOT_SUFFIX")
+      fi
+      if [ -z "$result" ]; then
+        result=$(find_existing_block "$by_name/$name")
+      fi
+      if [ -n "$result" ]; then
+        printf '%s\n' "$result"
+        return 0
+      fi
+    done
   fi
 
-  if [ -b "$dev" ]; then
-    echo "$dev"
+  if [ -n "$SLOT_SUFFIX" ]; then
+    result=$(find_existing_block "/dev/block/mapper/$name$SLOT_SUFFIX")
   fi
+  if [ -z "$result" ]; then
+    result=$(find_existing_block "/dev/block/mapper/$name")
+  fi
+  [ -n "$result" ] && printf '%s\n' "$result"
+}
+
+set_block_writable() {
+  if [ "$DYNAMIC_PARTITIONS" = "true" ] && ! blockdev --setrw "$1" >/dev/null 2>&1; then
+    ui_print "Warning: recovery could not set $1 writable; trying a read-write mount"
+  fi
+}
+
+mount_partition() {
+  local partition="$1"
+  local block="$2"
+  local mount_point="$3"
+
+  [ -n "$block" ] || error "Could not resolve the $partition block device from the recovery fstab for slot $SLOT_SUFFIX"
+  mkdir -p "$mount_point" || error "Could not create mount point $mount_point"
+  set_block_writable "$block"
+  if mount -o rw "$block" "$mount_point"; then
+    ui_print "$partition mounted at $mount_point"
+  else
+    error_mounting "$partition" "$block" "$mount_point"
+  fi
+}
+
+get_size_kb() {
+  local path="$1"
+  local size=""
+  [ -e "$path" ] || [ -L "$path" ] || { printf '0\n'; return 0; }
+  size=$(du -sk "$path" 2>/dev/null | awk 'NR == 1 { print $1 }')
+  case "$size" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$size"
+}
+
+reclaimable_size_kb() {
+  local source="$1"
+  local destination="$2"
+  local total=0
+  local source_file=""
+  local relative_file=""
+  local destination_file=""
+  local source_size=""
+  local destination_size=""
+
+  if [ -f "$source" ]; then
+    if [ -f "$destination" ]; then
+      source_size=$(get_size_kb "$source") || return 1
+      destination_size=$(get_size_kb "$destination") || return 1
+      [ "$destination_size" -le "$source_size" ] || destination_size="$source_size"
+      total="$destination_size"
+    fi
+    printf '%s\n' "$total"
+    return 0
+  fi
+
+  [ -d "$source" ] || { printf '0\n'; return 0; }
+  for source_file in $(find "$source" -type f); do
+    relative_file=$(printf '%s\n' "$source_file" | sed "s|^$source/||")
+    destination_file="$destination/$relative_file"
+    if [ -f "$destination_file" ]; then
+      source_size=$(get_size_kb "$source_file") || return 1
+      destination_size=$(get_size_kb "$destination_file") || return 1
+      [ "$destination_size" -le "$source_size" ] || destination_size="$source_size"
+      total=$((total + destination_size))
+    fi
+  done
+  printf '%s\n' "$total"
 }
 
 compute_apps_size() {
-  NEEDED_STORAGE_SYSTEM=$(expr $(du -cs `find -maxdepth 1 -mindepth 1 ! -name product ! -name system_ext` | tail -n1 | cut -f1) + $STORAGE_BUFFER)
-  NEEDED_STORAGE_PRODUCT=$(expr $(du -s ./product | cut -f1) + $STORAGE_BUFFER)
-  NEEDED_STORAGE_SYSTEM_EXT=$(expr $(du -s ./system_ext | cut -f1) + $STORAGE_BUFFER)
+  local entry=""
+  local entry_size=0
+  local entry_reclaimable=0
+  local payload_size=0
+  local payload_reclaimable=0
 
-  RECLAIMABLE_STORAGE_SYSTEM=$(find . ! -path "./product/*" ! -path "./system_ext/*" -type f | sed "s|^./|$SYSTEM_OUT/|" | xargs ls -d 2>/dev/null | xargs du -cs PLACEHOLDER 2>/dev/null | tail -n1 |  cut -f1)
-  NEEDED_STORAGE_SYSTEM=$(expr $NEEDED_STORAGE_SYSTEM - $RECLAIMABLE_STORAGE_SYSTEM)
+  NEEDED_STORAGE_SYSTEM=0
+  RECLAIMABLE_STORAGE_SYSTEM=0
+  for entry in *; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    case "$entry" in
+      product|system_ext) continue ;;
+    esac
+    entry_size=$(get_size_kb "$entry") || return 1
+    entry_reclaimable=$(reclaimable_size_kb "$entry" "$SYSTEM_OUT/$entry") || return 1
+    NEEDED_STORAGE_SYSTEM=$((NEEDED_STORAGE_SYSTEM + entry_size))
+    RECLAIMABLE_STORAGE_SYSTEM=$((RECLAIMABLE_STORAGE_SYSTEM + entry_reclaimable))
+  done
+  NEEDED_STORAGE_SYSTEM=$((NEEDED_STORAGE_SYSTEM - RECLAIMABLE_STORAGE_SYSTEM + STORAGE_BUFFER))
 
-  RECLAIMABLE_STORAGE_PRODUCT=$(find ./product -type f | sed "s|^./|$SYSTEM_OUT/|" | xargs ls -d 2>/dev/null | xargs du -cs PLACEHOLDER 2>/dev/null | tail -n1 |  cut -f1)
-  NEEDED_STORAGE_PRODUCT=$(expr $NEEDED_STORAGE_PRODUCT - $RECLAIMABLE_STORAGE_PRODUCT)
-
-  RECLAIMABLE_STORAGE_SYSTEM_EXT=$(find ./system_ext -type f | sed "s|^./|$SYSTEM_OUT/|" | xargs ls -d 2>/dev/null | xargs du -cs PLACEHOLDER 2>/dev/null | tail -n1 |  cut -f1)
-  NEEDED_STORAGE_SYSTEM_EXT=$(expr $NEEDED_STORAGE_SYSTEM_EXT - $RECLAIMABLE_STORAGE_SYSTEM_EXT)
-
-  if [ -z "$PRODUCT_BLOCK" ]; then
-    NEEDED_STORAGE_SYSTEM=$(expr $NEEDED_STORAGE_SYSTEM + $NEEDED_STORAGE_PRODUCT - $STORAGE_BUFFER)
+  NEEDED_STORAGE_PRODUCT=0
+  RECLAIMABLE_STORAGE_PRODUCT=0
+  if [ -d product ]; then
+    payload_size=$(get_size_kb product) || return 1
+    payload_reclaimable=$(reclaimable_size_kb product "$PRODUCT_OUT") || return 1
+    RECLAIMABLE_STORAGE_PRODUCT="$payload_reclaimable"
+    if [ -n "$PRODUCT_BLOCK" ]; then
+      NEEDED_STORAGE_PRODUCT=$((payload_size - payload_reclaimable + STORAGE_BUFFER))
+    else
+      NEEDED_STORAGE_SYSTEM=$((NEEDED_STORAGE_SYSTEM + payload_size - payload_reclaimable))
+    fi
   fi
-  if [ -z "$SYSTEM_EXT_BLOCK" ]; then
-    NEEDED_STORAGE_SYSTEM=$(expr $NEEDED_STORAGE_SYSTEM + $NEEDED_STORAGE_SYSTEM_EXT - $STORAGE_BUFFER)
+
+  NEEDED_STORAGE_SYSTEM_EXT=0
+  RECLAIMABLE_STORAGE_SYSTEM_EXT=0
+  if [ -d system_ext ]; then
+    payload_size=$(get_size_kb system_ext) || return 1
+    payload_reclaimable=$(reclaimable_size_kb system_ext "$SYSTEM_EXT_OUT") || return 1
+    RECLAIMABLE_STORAGE_SYSTEM_EXT="$payload_reclaimable"
+    if [ -n "$SYSTEM_EXT_BLOCK" ]; then
+      NEEDED_STORAGE_SYSTEM_EXT=$((payload_size - payload_reclaimable + STORAGE_BUFFER))
+    else
+      NEEDED_STORAGE_SYSTEM=$((NEEDED_STORAGE_SYSTEM + payload_size - payload_reclaimable))
+    fi
   fi
 }
 
-remove_big_optional_apps() {
-  ui_print "Low resource device detected, removing large extras"
-  rm -rf product/app/GoogleTTS
-  rm -rf product/app/SpeechServicesByGoogle
-  rm -rf product/app/talkback
-  rm -rf product/priv-app/GoogleRestore
-  rm -rf product/priv-app/Velvet
-  rm -rf product/priv-app/VelvetTitan
-  rm -rf product/priv-app/Wellbeing
-  rm -rf system_ext/priv-app/SetupWizard
+get_available_kb() {
+  local available=""
+  available=$(df -k "$1" 2>/dev/null | awk 'END { print $4 }')
+  case "$available" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$available"
+}
+
+generate_addon_d() {
+  [ -f addon.d/addond_head ] || error "Missing addon.d header template"
+  [ -f addon.d/addond_tail ] || error "Missing addon.d footer template"
+  find . -type f ! -path "./addon.d/*" -print > "$WORKDIR/addond.files" || error "Could not list GApps files for addon.d"
+  LC_ALL=C sort "$WORKDIR/addond.files" > "$WORKDIR/addond.files.sorted" || error "Could not sort addon.d file list"
+
+  cat addon.d/addond_head > addon.d/30-gapps.sh.tmp || error "Could not create addon.d script"
+  sed 's#^\./##' "$WORKDIR/addond.files.sorted" >> addon.d/30-gapps.sh.tmp || error "Could not populate addon.d file list"
+  cat addon.d/addond_tail >> addon.d/30-gapps.sh.tmp || error "Could not finish addon.d script"
+  mv addon.d/30-gapps.sh.tmp addon.d/30-gapps.sh || error "Could not finalize addon.d script"
+  if ! sh -n addon.d/30-gapps.sh; then
+    error "Generated addon.d script is invalid"
+  fi
+  rm -f addon.d/addond_head addon.d/addond_tail || error "Could not remove addon.d templates"
 }
 
 ui_print "**********************"
@@ -121,166 +308,196 @@ ui_print "MindTheGapps installer"
 ui_print "**********************"
 
 ui_print "Extracting files"
-TMP=/tmp
-cd "$TMP"
-unzip -o "$ZIP"
+case "$ZIP" in
+  /*) ;;
+  *) ZIP="$(pwd)/$ZIP" ;;
+esac
+[ -f "$ZIP" ] || error "GApps ZIP was not found at $ZIP"
+rm -rf "$WORKDIR" || error "Could not prepare installer working directory"
+mkdir -p "$WORKDIR" || error "Could not create installer working directory"
+cd "$WORKDIR" || error "Could not enter installer working directory"
+if ! unzip -o "$ZIP"; then
+  error "Could not extract the GApps ZIP"
+fi
 rm -rf META-INF
 
-# Check for arch. We need to do this before extracting our toybox, since that might be
-# compiled for a different architecture. Just hope that all environments have at least
-# a proper `grep` and `uname`.
-GAPPS_ARCH=$(getprop2 $TMP/build.prop arch)
+[ -s "$WORKDIR/build.prop" ] || error "GApps build.prop is missing from the ZIP"
+GAPPS_ARCH=$(getprop2 "$WORKDIR/build.prop" arch)
 CPU_ARCH=$(getprop ro.bionic.arch)
-if [ $GAPPS_ARCH != $CPU_ARCH ]; then
+if [ -z "$GAPPS_ARCH" ] || [ -z "$CPU_ARCH" ] || [ "$GAPPS_ARCH" != "$CPU_ARCH" ]; then
   error "This package is built for $GAPPS_ARCH but your device is $CPU_ARCH! Aborting"
 fi
 
 ui_print "Setting up environment"
-TOYBOX="${TMP}/toybox"
-chmod +x "$TOYBOX"
-
-TOYS_PATH="${TMP}/bin"
-rm -rf "$TOYS_PATH";
-$TOYBOX install -d "$TOYS_PATH"
-for toy in $($TOYBOX); do
-  $TOYBOX ln -sf "$TOYBOX" "${TOYS_PATH}/${toy}"
+[ -s "$TOYBOX" ] || error "Toybox is missing from the GApps ZIP"
+chmod +x "$TOYBOX" || error "Could not prepare Toybox"
+rm -rf "$TOYS_PATH"
+"$TOYBOX" install -d "$TOYS_PATH" || error "Could not create Toybox command directory"
+for toy in $("$TOYBOX"); do
+  "$TOYBOX" ln -sf "$TOYBOX" "$TOYS_PATH/$toy" || error "Could not link Toybox command $toy"
 done
-PATH="${TOYS_PATH}:${PATH}"
+PATH="$TOYS_PATH:$PATH"
+export PATH
 
 ui_print "Mounting partitions"
 
-# Ensure system is unmounted so mounting succeeds
-umount /system || umount /mnt/system || true
-umount /product || true
-umount /system_ext || true
+PARTITIONS_TOUCHED=true
+for mount_point in /system /system_root "$SYSTEM_MNT" "$PRODUCT_MNT" "$SYSTEM_EXT_MNT"; do
+  umount "$mount_point" >/dev/null 2>&1 || umount -l "$mount_point" >/dev/null 2>&1 || true
+done
 
-# Find partitions
-DYNAMIC_PARTITIONS=`getprop ro.boot.dynamic_partitions`
+DYNAMIC_PARTITIONS=$(getprop ro.boot.dynamic_partitions)
+case "$DYNAMIC_PARTITIONS" in
+  true|1) DYNAMIC_PARTITIONS=true ;;
+  *) DYNAMIC_PARTITIONS=false ;;
+esac
+
+SLOT_SUFFIX=$(getprop ro.boot.slot_suffix)
+case "$SLOT_SUFFIX" in
+  ""|_a|_b) ;;
+  *) error "Unsupported active slot suffix: $SLOT_SUFFIX" ;;
+esac
+
 if [ "$DYNAMIC_PARTITIONS" = "true" ]; then
-    BLK_PATH="/dev/block/mapper"
+  BLK_PATH=/dev/block/mapper
 else
-    BLK_PATH=/dev/block/bootdevice/by-name
+  BLK_PATH=/dev/block/bootdevice/by-name
 fi
 
-CURRENTSLOT=`getprop ro.boot.slot_suffix`
-if [ ! -z "$CURRENTSLOT" ]; then
-  if [ "$CURRENTSLOT" == "_a" ]; then
-    SLOT_SUFFIX="_a"
-  else
-    SLOT_SUFFIX="_b"
-  fi
+if [ ! -r "$RECOVERY_FSTAB" ] && [ -r /etc/fstab ]; then
+  RECOVERY_FSTAB=/etc/fstab
 fi
 
-SYSTEM_BLOCK=$(find_block "system")
-PRODUCT_BLOCK=$(find_block "product")
-SYSTEM_EXT_BLOCK=$(find_block "system_ext")
+SYSTEM_BLOCK=$(find_block system)
+[ -n "$SYSTEM_BLOCK" ] || error "Could not resolve the system block device from the recovery fstab for slot $SLOT_SUFFIX"
+PRODUCT_BLOCK=$(find_block product)
+SYSTEM_EXT_BLOCK=$(find_block system_ext)
 
-# Disable rw protection on dynamic partitions
-if [ "$DYNAMIC_PARTITIONS" = "true" ]; then
-  blockdev --setrw "$SYSTEM_BLOCK"
-  if [ -n "$PRODUCT_BLOCK" ]; then
-    blockdev --setrw "$PRODUCT_BLOCK"
-  fi
-  if [ -n "$SYSTEM_EXT_BLOCK" ]; then
-    blockdev --setrw "$SYSTEM_EXT_BLOCK"
-  fi
-fi
+mount_partition system "$SYSTEM_BLOCK" "$SYSTEM_MNT"
 
-# Mount and define SYSTEM_OUT
-SYSTEM_MNT=/mnt/system
-mkdir -p "$SYSTEM_MNT" || true
-if mount -o rw "$SYSTEM_BLOCK" "$SYSTEM_MNT"; then
-ui_print "$SYSTEM_MNT mounted"
+if [ -f "$SYSTEM_MNT/system/build.prop" ]; then
+  SYSTEM_OUT="$SYSTEM_MNT/system"
+elif [ -f "$SYSTEM_MNT/build.prop" ]; then
+  SYSTEM_OUT="$SYSTEM_MNT"
 else
-error_mounting "$SYSTEM_MNT"
+  error "Mounted system at $SYSTEM_MNT but could not find build.prop"
 fi
-SYSTEM_OUT="${SYSTEM_MNT}/system"
 
-# Compare sdk version
-GAPPS_VERSION=$(getprop2 $TMP/build.prop version)
-ANDROID_VERSION=$(getprop2 $SYSTEM_OUT/build.prop ro.build.version.sdk)
+GAPPS_VERSION=$(getprop2 "$WORKDIR/build.prop" version)
+ANDROID_VERSION=$(getprop2 "$SYSTEM_OUT/build.prop" ro.build.version.sdk)
+if [ -z "$GAPPS_VERSION" ] || [ -z "$ANDROID_VERSION" ]; then
+  error "Could not read Android SDK versions from the GApps ZIP and mounted system"
+fi
 if [ "$GAPPS_VERSION" != "$ANDROID_VERSION" ]; then
-  gapps_version_nice=$(getprop2 $TMP/build.prop version_nice)
-  android_version_nice=$(getprop2 $SYSTEM_OUT/build.prop ro.build.version.release)
+  gapps_version_nice=$(getprop2 "$WORKDIR/build.prop" version_nice)
+  android_version_nice=$(getprop2 "$SYSTEM_OUT/build.prop" ro.build.version.release)
   error "This package is for Android $gapps_version_nice (SDK $GAPPS_VERSION) but your system is Android $android_version_nice (SDK $ANDROID_VERSION)! Aborting"
 fi
 
-# Ignore {product,system_ext} block devices in case they are symlinks
-# This is common on devices where maintainers have chosen not to use
-# real partitions because of their size being too small to be useful
-if [ -L "${SYSTEM_MNT}/product" ]; then
-PRODUCT_BLOCK=""
-fi
-if [ -L "${SYSTEM_MNT}/system_ext" ]; then
-SYSTEM_EXT_BLOCK=""
-fi
+# Resolve integrated product and system_ext symlinks in either supported system layout.
+PRODUCT_LINK_OUT=""
+SYSTEM_EXT_LINK_OUT=""
+resolve_partition_link() {
+  local name="$1"
+  local block="$2"
+  local link_path=""
+  local link_target=""
+  local relative_target=""
+  local resolved_path=""
+
+  if [ -L "$SYSTEM_MNT/$name" ]; then
+    link_path="$SYSTEM_MNT/$name"
+  elif [ -L "$SYSTEM_OUT/$name" ]; then
+    link_path="$SYSTEM_OUT/$name"
+  else
+    return 0
+  fi
+
+  link_target=$(readlink "$link_path") || error "Could not read $name symlink at $link_path"
+  case "$link_target" in
+    "/$name")
+      [ -n "$block" ] || error "$name points to an unmounted /$name path"
+      return 0
+      ;;
+    /system/*)
+      relative_target=$(printf "%s\n" "$link_target" | sed "s#^/system/##")
+      resolved_path="$SYSTEM_OUT/$relative_target"
+      ;;
+    /*)
+      resolved_path="$SYSTEM_MNT$link_target"
+      ;;
+    *)
+      resolved_path="$(dirname "$link_path")/$link_target"
+      ;;
+  esac
+
+  if [ "$name" = product ]; then
+    PRODUCT_LINK_OUT="$resolved_path"
+    PRODUCT_BLOCK=""
+  else
+    SYSTEM_EXT_LINK_OUT="$resolved_path"
+    SYSTEM_EXT_BLOCK=""
+  fi
+}
+resolve_partition_link product "$PRODUCT_BLOCK"
+resolve_partition_link system_ext "$SYSTEM_EXT_BLOCK"
 
 if [ -n "$PRODUCT_BLOCK" ]; then
-  mkdir /product || true
-  if mount -o rw "$PRODUCT_BLOCK" /product; then
-    ui_print "/product mounted"
-  else
-    error_mounting "/product"
-  fi
+  mount_partition product "$PRODUCT_BLOCK" "$PRODUCT_MNT"
+  PRODUCT_OUT="$PRODUCT_MNT"
+elif [ -n "$PRODUCT_LINK_OUT" ]; then
+  PRODUCT_OUT="$PRODUCT_LINK_OUT"
+else
+  PRODUCT_OUT="$SYSTEM_OUT/product"
 fi
 if [ -n "$SYSTEM_EXT_BLOCK" ]; then
-  mkdir /system_ext || true
-  if mount -o rw "$SYSTEM_EXT_BLOCK" /system_ext; then
-    ui_print "/system_ext mounted"
-  else
-    error_mounting "/system_ext"
-  fi
+  mount_partition system_ext "$SYSTEM_EXT_BLOCK" "$SYSTEM_EXT_MNT"
+  SYSTEM_EXT_OUT="$SYSTEM_EXT_MNT"
+elif [ -n "$SYSTEM_EXT_LINK_OUT" ]; then
+  SYSTEM_EXT_OUT="$SYSTEM_EXT_LINK_OUT"
+else
+  SYSTEM_EXT_OUT="$SYSTEM_OUT/system_ext"
 fi
 
-# Compute storage requirements
-SYSTEM_STORAGE=`df $SYSTEM_MNT | tail -1 | tr -s ' ' | cut -d ' ' -f4`
+# Compute storage requirements using the actual destination for each partition.
+SYSTEM_STORAGE=$(get_available_kb "$SYSTEM_MNT") || error "Could not read available system partition space"
 if [ -n "$PRODUCT_BLOCK" ]; then
-  PRODUCT_STORAGE=`df /product | tail -1 | tr -s ' ' | cut -d ' ' -f4`
+  PRODUCT_STORAGE=$(get_available_kb "$PRODUCT_MNT") || error "Could not read available product partition space"
 fi
 if [ -n "$SYSTEM_EXT_BLOCK" ]; then
-  SYSTEM_EXT_STORAGE=`df /system_ext | tail -1 | tr -s ' ' | cut -d ' ' -f4`
+  SYSTEM_EXT_STORAGE=$(get_available_kb "$SYSTEM_EXT_MNT") || error "Could not read available system_ext partition space"
 fi
 STORAGE_BUFFER=10240
 
-cd system
-
-# Detect tangorpro
-DEVICE=$(getprop ro.build.product)
-if [ "$DEVICE" == "tangorpro" ]; then
-  ui_print "Detected tangorpro device. Deleting normal Velvet app"
-  rm -rf product/priv-app/Velvet
-else
-  rm -rf product/priv-app/VelvetTitan
+cd "$WORKDIR/system" || error "GApps system payload is missing from the ZIP"
+if ! compute_apps_size; then
+  error "Could not calculate GApps storage requirements"
 fi
 
-compute_apps_size
-
+ui_print "System: need $NEEDED_STORAGE_SYSTEM KB, available $SYSTEM_STORAGE KB"
 if [ "$SYSTEM_STORAGE" -lt "$NEEDED_STORAGE_SYSTEM" ]; then
-  remove_big_optional_apps
-  compute_apps_size
-  if [ "$SYSTEM_STORAGE" -lt "$NEEDED_STORAGE_SYSTEM" ]; then
-    error_no_space
-  fi
+  error_no_space system "$NEEDED_STORAGE_SYSTEM" "$SYSTEM_STORAGE"
 fi
-if [ -n "$PRODUCT_BLOCK" ] && [ "$PRODUCT_STORAGE" -lt "$NEEDED_STORAGE_PRODUCT" ]; then
-  remove_big_optional_apps
-  compute_apps_size
+if [ -n "$PRODUCT_BLOCK" ]; then
+  ui_print "Product: need $NEEDED_STORAGE_PRODUCT KB, available $PRODUCT_STORAGE KB"
   if [ "$PRODUCT_STORAGE" -lt "$NEEDED_STORAGE_PRODUCT" ]; then
-    error_no_space
+    error_no_space product "$NEEDED_STORAGE_PRODUCT" "$PRODUCT_STORAGE"
   fi
 fi
-if [ -n "$SYSTEM_EXT_BLOCK" ] && [ "$SYSTEM_EXT_STORAGE" -lt "$NEEDED_STORAGE_SYSTEM_EXT" ]; then
-  remove_big_optional_apps
-  compute_apps_size
+if [ -n "$SYSTEM_EXT_BLOCK" ]; then
+  ui_print "System_ext: need $NEEDED_STORAGE_SYSTEM_EXT KB, available $SYSTEM_EXT_STORAGE KB"
   if [ "$SYSTEM_EXT_STORAGE" -lt "$NEEDED_STORAGE_SYSTEM_EXT" ]; then
-    error_no_space
+    error_no_space system_ext "$NEEDED_STORAGE_SYSTEM_EXT" "$SYSTEM_EXT_STORAGE"
   fi
 fi
+
+ui_print "Generating addon.d file"
+generate_addon_d
 
 ui_print "Preparing files for copying"
-for d in `find . -mindepth 1 -type d -type d`; do
-  set_perm 0755 $d
-  set_owner root root $d
+for d in $(find . -mindepth 1 -type d); do
+  set_perm 0755 "$d"
+  set_owner root root "$d"
 done
 for f in `find . -type f`; do
   type=$(echo "$f" | sed 's/.*\.//')
@@ -294,17 +511,40 @@ for f in `find . -type f`; do
 done
 
 ui_print "Copying files"
-cp --preserve=a -r ./* "${SYSTEM_OUT}/"
-if [ -n "$PRODUCT_BLOCK" ]; then
-  cp --preserve=a -r ./product/* /product
+for entry in *; do
+  [ -e "$entry" ] || [ -L "$entry" ] || continue
+  case "$entry" in
+    product|system_ext) continue ;;
+  esac
+  if ! cp --preserve=a -r "$entry" "$SYSTEM_OUT/"; then
+    error "Could not copy $entry into the system partition"
+  fi
+done
+
+if [ -d product ]; then
+  mkdir -p "$PRODUCT_OUT" || error "Could not prepare the product destination"
+  if ! cp --preserve=a -r ./product/. "$PRODUCT_OUT/"; then
+    error "Could not copy the product payload"
+  fi
 fi
-if [ -n "$SYSTEM_EXT_BLOCK" ]; then
-  cp --preserve=a -r ./system_ext/* /system_ext
+if [ -d system_ext ]; then
+  mkdir -p "$SYSTEM_EXT_OUT" || error "Could not prepare the system_ext destination"
+  if ! cp --preserve=a -r ./system_ext/. "$SYSTEM_EXT_OUT/"; then
+    error "Could not copy the system_ext payload"
+  fi
 fi
 
-if [ -e system_ext/priv-app/SetupWizard ] ; then
-  rm -rf "${SYSTEM_OUT}/system_ext/priv-app/Provision"
-fi
+verify_installed_file() {
+  [ -s "$1" ] || error "GApps installation is incomplete; missing $1"
+}
+
+verify_installed_file "$PRODUCT_OUT/apex/com.google.android.gmssystem.prodvic.apex"
+verify_installed_file "$PRODUCT_OUT/priv-app/Phonesky/Phonesky.apk"
+verify_installed_file "$PRODUCT_OUT/app/GoogleCalendarSyncAdapter/GoogleCalendarSyncAdapter.apk"
+verify_installed_file "$PRODUCT_OUT/app/GoogleContactsSyncAdapter/GoogleContactsSyncAdapter.apk"
+verify_installed_file "$SYSTEM_EXT_OUT/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk"
+verify_installed_file "$SYSTEM_OUT/addon.d/30-gapps.sh"
+[ -x "$SYSTEM_OUT/addon.d/30-gapps.sh" ] || error "GApps addon.d restore script is not executable"
 
 cleanup
 
