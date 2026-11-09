@@ -1,13 +1,22 @@
-name: Check
+name: Build and Release
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - cinnamonbun
+  pull_request:
+    branches:
+      - cinnamonbun
+
+permissions:
+  contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
-
     steps:
-      - run: |
+      - name: Install build dependencies
+        run: |
           sudo apt -y install python3-parse
 
           curl --fail --location --silent --show-error --output aapt2.jar https://dl.google.com/android/maven2/com/android/tools/build/aapt2/8.12.0-alpha05-12782657/aapt2-8.12.0-alpha05-12782657-linux.jar
@@ -22,12 +31,58 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          path: out/*-arm64-*.zip
+          path: out/MindTheGapps-Lite-*-arm64-*.zip
           if-no-files-found: error
           archive: false
 
       - uses: actions/upload-artifact@v7
         with:
-          path: out/*-arm64-*.zip.sha256sum
+          path: out/MindTheGapps-Lite-*-arm64-*.zip.sha256sum
           if-no-files-found: error
           archive: false
+
+  publish:
+    name: Publish arm64 prerelease
+    if: github.event_name == 'push' && github.ref == 'refs/heads/cinnamonbun'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: MindTheGapps-Lite-*-arm64-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package="$(find release-assets -maxdepth 1 -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print -quit)"
+          if [ -z "$package" ]; then
+            echo "MindTheGapps-Lite arm64 ZIP was not downloaded" >&2
+            exit 1
+          fi
+
+          checksum="$package.sha256sum"
+          if [ ! -f "$checksum" ]; then
+            echo "Checksum file is missing: $checksum" >&2
+            exit 1
+          fi
+
+          (
+            cd release-assets
+            sha256sum -c "$(basename "$checksum")"
+          )
+
+          version="$(basename "$package" | cut -d- -f3)"
+          tag="mindthegapps-lite-arm64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          gh release create "$tag" "$package" "$checksum" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "MindTheGapps-Lite $version arm64 build $GITHUB_RUN_NUMBER" \
+            --notes "Automated arm64 prerelease from cinnamonbun at $GITHUB_SHA." \
+            --prerelease \
+            --latest=false

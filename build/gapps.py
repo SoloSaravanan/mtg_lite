@@ -33,7 +33,7 @@ GAPPS_OUT_GARCH_SYSTEM = GAPPS_OUT_GARCH / "system"
 GAPPS_OUT_GARCH_SYSTEM_ADDOND = GAPPS_OUT_GARCH_SYSTEM / "addon.d"
 GAPPS_OUT_ZIP_BASENAME = (
     GAPPS_OUT
-    / f"MindTheGapps-{ANDROIDV}-{GARCH}-{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}"
+    / f"MindTheGapps-Lite-{ANDROIDV}-{GARCH}-{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}"
 )
 GAPPS_OUT_ZIP_BASENAME_UNSIGNED = Path(f"{GAPPS_OUT_ZIP_BASENAME}-unsigned")
 GAPPS_OUT_ZIP_FILENAME = Path(f"{GAPPS_OUT_ZIP_BASENAME}.zip")
