@@ -60,18 +60,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          package="$(find release-assets -maxdepth 1 -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print -quit)"
-          if [ -z "$package" ]; then
-            echo "MindTheGapps-Lite arm64 ZIP was not downloaded" >&2
+          set -euo pipefail
+          gh --version
+          test -n "$GH_TOKEN"
+
+          mapfile -d '' packages < <(find release-assets -maxdepth 1 -type f -name 'MindTheGapps-Lite-*-arm64-*.zip' -print0)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected exactly one MindTheGapps-Lite arm64 ZIP; found ${#packages[@]}" >&2
+            find release-assets -maxdepth 1 -type f -printf '%f\n' >&2
             exit 1
           fi
-
+          package="${packages[0]}"
           checksum="$package.sha256sum"
           if [ ! -f "$checksum" ]; then
             echo "Checksum file is missing: $checksum" >&2
+            find release-assets -maxdepth 1 -type f -printf '%f\n' >&2
             exit 1
           fi
 
+          printf 'Release package: %s\nChecksum: %s\n' "$package" "$checksum"
           (
             cd release-assets
             sha256sum -c "$(basename "$checksum")"
@@ -79,10 +86,24 @@ jobs:
 
           version="$(basename "$package" | cut -d- -f3)"
           tag="mindthegapps-lite-arm64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          gh release create "$tag" "$package" "$checksum" \
+          if release_output="$(gh release create "$tag" "$package" "$checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "MindTheGapps-Lite $version arm64 build $GITHUB_RUN_NUMBER" \
             --notes "Automated arm64 prerelease from cinnamonbun at $GITHUB_SHA." \
             --prerelease \
-            --latest=false
+            --latest=false 2>&1)"; then
+            printf '%s\n' "$release_output"
+          else
+            status=$?
+            details="${release_output//$GH_TOKEN/[REDACTED]}"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            printf '::error title=GitHub prerelease failed::%s\n' "$details"
+            {
+              printf 'Release command failed with exit code %s.\n\n' "$status"
+              printf '%s\n' "$release_output"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
