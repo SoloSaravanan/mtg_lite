@@ -279,21 +279,40 @@ compute_apps_size() {
 }
 
 parse_df_available_kb() {
-  awk '
-    NR == 1 {
-      for (i = 1; i <= NF; i++) {
-        if ($i ~ /^Avail/) available_col = i
-      }
-      next
-    }
-    available_col > 0 && $available_col ~ /^[0-9]+$/ {
-      available = $available_col
-    }
-    END {
-      if (available != "") print available
-      else exit 1
-    }
-  '
+  local line field available_col=0 field_index
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    set -- $line
+
+    if [ "$available_col" -eq 0 ]; then
+      field_index=1
+      for field do
+        case "$field" in
+          [Aa][Vv][Aa][Ii][Ll]*)
+            available_col="$field_index"
+            break
+            ;;
+        esac
+        field_index=$((field_index + 1))
+      done
+      continue
+    fi
+
+    field_index=1
+    for field do
+      if [ "$field_index" -eq "$available_col" ]; then
+        case "$field" in
+          ''|*[!0-9]*) break ;;
+        esac
+        printf '%s\n' "$field"
+        return 0
+      fi
+      field_index=$((field_index + 1))
+    done
+  done
+
+  return 1
 }
 
 get_available_kb() {
