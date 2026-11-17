@@ -278,13 +278,50 @@ compute_apps_size() {
   fi
 }
 
+parse_df_available_kb() {
+  awk '
+    NR == 1 {
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^Avail/) available_col = i
+      }
+      next
+    }
+    available_col > 0 && $available_col ~ /^[0-9]+$/ {
+      available = $available_col
+    }
+    END {
+      if (available != "") print available
+      else exit 1
+    }
+  '
+}
+
 get_available_kb() {
+  local path="$1"
+  local df_command=""
+  local output=""
   local available=""
-  available=$(df -k "$1" 2>/dev/null | awk 'END { print $4 }')
-  case "$available" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  printf '%s\n' "$available"
+
+  # Prefer the package's Toybox, then recovery's df if its Toybox differs.
+  for df_command in df /system/bin/df; do
+    output=$("$df_command" -kP "$path" 2>&1)
+    available=$(printf '%s\n' "$output" | parse_df_available_kb)
+    case "$available" in
+      ''|*[!0-9]*)
+        # Fall back for df implementations that do not support POSIX output.
+        output=$("$df_command" -k "$path" 2>&1)
+        available=$(printf '%s\n' "$output" | parse_df_available_kb)
+        ;;
+    esac
+    case "$available" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    printf '%s\n' "$available"
+    return 0
+  done
+
+  ui_print "df output for $path: $(printf '%s\n' "$output" | tr '\n' ' ')"
+  return 1
 }
 
 generate_addon_d() {
